@@ -1,0 +1,15 @@
+[package]
+name = "tendril"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+smithay = { version = "0.7", default-features = false, features = ["backend_winit"] }
+calloop = "0.14"
+wayland-server = "0.31"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+log = "0.4"
+env_logger = "0.11"
+cgmath = "0.18"
+tendril-ipc = { path = "../tendril-ipc" }
