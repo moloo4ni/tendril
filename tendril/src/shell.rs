@@ -5,9 +5,11 @@ use smithay::delegate_compositor;
 use smithay::delegate_data_device;
 use smithay::delegate_seat;
 use smithay::delegate_shm;
+use smithay::delegate_xdg_decoration;
 use smithay::delegate_xdg_shell;
 use smithay::desktop::Window as SmithayWindow;
 use smithay::input::{pointer::CursorImageStatus, Seat, SeatHandler, SeatState};
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_seat;
 use smithay::utils::Serial;
@@ -19,6 +21,7 @@ use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
 };
 use smithay::wayland::selection::SelectionHandler;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
@@ -79,7 +82,11 @@ impl XdgShellHandler for TendrilState {
 
         let smithay_window = SmithayWindow::new_wayland_window(surface);
         let window = Window::new(smithay_window, window_height);
-        self.active_column_mut().windows.push(window);
+
+        // add to the column with fewer windows (prefer right on tie)
+        let ws = self.workspace_mut();
+        let left = ws.left_column.windows.len() < ws.right_column.windows.len();
+        ws.column_mut(left).windows.push(window);
         self.needs_redraw = true;
     }
 
@@ -132,8 +139,32 @@ impl ServerDndGrabHandler for TendrilState {
     fn send(&mut self, _mime_type: String, _fd: OwnedFd, _seat: Seat<Self>) {}
 }
 
+impl XdgDecorationHandler for TendrilState {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: Mode) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+}
+
 delegate_compositor!(TendrilState);
 delegate_xdg_shell!(TendrilState);
+delegate_xdg_decoration!(TendrilState);
 delegate_shm!(TendrilState);
 delegate_seat!(TendrilState);
 delegate_data_device!(TendrilState);

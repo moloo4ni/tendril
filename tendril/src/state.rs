@@ -22,6 +22,7 @@ use smithay::wayland::compositor::{
 use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 use wayland_server::protocol::wl_surface;
@@ -200,6 +201,7 @@ pub struct TendrilState {
     pub config: Config,
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub decoration_state: XdgDecorationState,
     pub shm_state: ShmState,
     pub seat_state: SeatState<Self>,
     pub seat: Seat<Self>,
@@ -219,6 +221,7 @@ impl TendrilState {
         backend: winit::WinitGraphicsBackend<GlesRenderer>,
         compositor_state: CompositorState,
         xdg_shell_state: XdgShellState,
+        decoration_state: XdgDecorationState,
         shm_state: ShmState,
         seat_state: SeatState<Self>,
         seat: Seat<Self>,
@@ -237,6 +240,7 @@ impl TendrilState {
             config: Config::default(),
             compositor_state,
             xdg_shell_state,
+            decoration_state,
             shm_state,
             seat_state,
             seat,

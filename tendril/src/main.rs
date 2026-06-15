@@ -12,6 +12,7 @@ use smithay::reexports::calloop;
 use smithay::reexports::wayland_server::Display;
 use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
@@ -47,6 +48,7 @@ fn main() {
 
     let compositor_state = CompositorState::new::<TendrilState>(&dh);
     let xdg_shell_state = XdgShellState::new::<TendrilState>(&dh);
+    let decoration_state = XdgDecorationState::new::<TendrilState>(&dh);
     let shm_state = ShmState::new::<TendrilState>(&dh, vec![]);
     let data_device_state = DataDeviceState::new::<TendrilState>(&dh);
     let mut seat_state = SeatState::new();
@@ -59,6 +61,7 @@ fn main() {
         backend,
         compositor_state,
         xdg_shell_state,
+        decoration_state,
         shm_state,
         seat_state,
         seat,
