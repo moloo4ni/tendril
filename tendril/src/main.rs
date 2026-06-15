@@ -50,7 +50,10 @@ fn main() {
     let shm_state = ShmState::new::<TendrilState>(&dh, vec![]);
     let data_device_state = DataDeviceState::new::<TendrilState>(&dh);
     let mut seat_state = SeatState::new();
-    let seat = seat_state.new_wl_seat(&dh, "default");
+    let mut seat = seat_state.new_wl_seat(&dh, "default");
+
+    let keyboard = seat.add_keyboard(Default::default(), 200, 200).ok();
+    let pointer = Some(seat.add_pointer());
 
     let tendril = TendrilState::new(
         backend,
@@ -61,6 +64,8 @@ fn main() {
         seat,
         data_device_state,
         dh,
+        keyboard,
+        pointer,
     );
 
     let mut app_state = AppState { display, tendril };

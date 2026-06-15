@@ -11,18 +11,22 @@ use smithay::backend::renderer::utils::draw_render_elements;
 use smithay::backend::renderer::{Color32F, Frame, Renderer};
 use smithay::backend::winit::{self, WinitEvent};
 use smithay::desktop::Window as SmithayWindow;
+use smithay::input::keyboard::KeyboardHandle;
+use smithay::input::pointer::PointerHandle;
 use smithay::input::{Seat, SeatState};
-use smithay::wayland::seat::WaylandFocus;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Rectangle, Transform};
+use smithay::utils::{Rectangle, Serial, Transform};
 use smithay::wayland::compositor::{
     with_surface_tree_downward, SurfaceAttributes, TraversalAction,
 };
+use smithay::wayland::compositor::CompositorState;
+use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
-use smithay::wayland::compositor::CompositorState;
-use smithay::wayland::selection::data_device::DataDeviceState;
 use wayland_server::protocol::wl_surface;
+
+use crate::input;
 
 static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -201,6 +205,12 @@ pub struct TendrilState {
     pub seat: Seat<Self>,
     pub data_device_state: DataDeviceState,
     pub display_handle: DisplayHandle,
+    pub viewport_size: (u32, u32),
+    pub cursor_pos: (f64, f64),
+    pub mod_pressed: bool,
+    pub shift_pressed: bool,
+    pub keyboard_handle: Option<KeyboardHandle<Self>>,
+    pub pointer_handle: Option<PointerHandle<Self>>,
 }
 
 impl TendrilState {
@@ -214,7 +224,10 @@ impl TendrilState {
         seat: Seat<Self>,
         data_device_state: DataDeviceState,
         display_handle: DisplayHandle,
+        keyboard_handle: Option<KeyboardHandle<Self>>,
+        pointer_handle: Option<PointerHandle<Self>>,
     ) -> Self {
+        let size = backend.window_size();
         let workspaces = (0..5).map(Workspace::new).collect();
         TendrilState {
             backend,
@@ -229,6 +242,12 @@ impl TendrilState {
             seat,
             data_device_state,
             display_handle,
+            viewport_size: (size.w as u32, size.h as u32),
+            cursor_pos: (0.0, 0.0),
+            mod_pressed: false,
+            shift_pressed: false,
+            keyboard_handle,
+            pointer_handle,
         }
     }
 
@@ -264,15 +283,63 @@ impl TendrilState {
                 log::info!("close requested, shutting down");
                 std::process::exit(0);
             }
-            WinitEvent::Resized { size, scale_factor } => {
-                log::debug!("window resized to {size:?} (scale: {scale_factor})");
+            WinitEvent::Resized { size, .. } => {
+                self.viewport_size = (size.w as u32, size.h as u32);
+                self.reconfigure_windows();
+                self.needs_redraw = true;
             }
             WinitEvent::Redraw => {
                 self.needs_redraw = true;
             }
             WinitEvent::Focus(_) => {}
-            WinitEvent::Input(_) => {}
+            WinitEvent::Input(event) => {
+                input::handle_input(self, event);
+            }
         }
+    }
+
+    pub fn reconfigure_windows(&mut self) {
+        let col_width = (self.viewport_size.0 - self.config.gaps) / 2;
+        let win_h = self.config.window_height;
+        for left in [true, false] {
+            let idxs: Vec<usize> = (0..self.workspace().column(left).windows.len()).collect();
+            for idx in idxs {
+                let toplevel = self.workspace_mut().column_mut(left).windows[idx]
+                    .toplevel
+                    .toplevel()
+                    .cloned();
+                if let Some(tl) = toplevel {
+                    tl.with_pending_state(|state| {
+                        state.size = Some((col_width as i32, win_h as i32).into());
+                    });
+                    tl.send_configure();
+                }
+            }
+        }
+    }
+
+    pub fn window_at(&self, x: f64, y: f64) -> Option<(bool, usize)> {
+        let col_width = (self.viewport_size.0 - self.config.gaps) / 2;
+        let gaps = self.config.gaps as f64;
+        for left in [true, false] {
+            let col = self.workspace().column(left);
+            let col_x = if left { gaps } else { col_width as f64 + gaps };
+            for (i, w) in col.windows.iter().enumerate() {
+                let wy = w.y_position(i, &self.config, col.scroll_offset);
+                if x >= col_x
+                    && x < col_x + col_width as f64
+                    && y >= wy
+                    && y < wy + w.height as f64
+                {
+                    return Some((left, i));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn serial(&self) -> Serial {
+        Serial::from(0)
     }
 
     pub fn idle(&mut self) {
