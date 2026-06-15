@@ -4,18 +4,35 @@ A minimal scroll-driven Wayland compositor with a fixed two-column layout, writt
 
 ## Status
 
-- **Stage 1** — initialization: workspace structure, winit backend, calloop event loop, minimal rendering
-- **Stage 2** — core state & geometry: `Window`, `Column`, `Workspace`, scroll math, unit tests
-- **Stage 3** — Wayland surface handling: `CompositorHandler`, `XdgShellHandler`, listening socket, client dispatch, surface rendering, frame callbacks
-- **Stage 4** — input handling: Mod/Super key tracking, keyboard forwarding, pointer motion/button/axis events, Mod+Scroll column scrolling, pointer-click window focus
+| Stage | What | Done |
+|---|---|---|
+| 1 | Workspace structure, winit backend, calloop event loop, minimal rendering | ✓ |
+| 2 | Core state & geometry: `Window`, `Column`, `Workspace`, scroll math, unit tests | ✓ |
+| 3 | Wayland surface handling: `CompositorHandler`, `XdgShellHandler`, listening socket, client dispatch, surface rendering, frame callbacks | ✓ |
+| 4 | Input handling: Mod/Super tracking, keyboard forwarding, pointer motion/button/axis, scroll, focus-on-click | ✓ |
+| 5 | IPC — Unix socket, JSON-RPC protocol, `tendrilc` CLI client | |
+| 6 | Rendering & animations — damage tracking, smooth LERP scroll, Z-axis effect | |
+
+## Known Issues
+
+- **Scroll not working** — winit backend on Wayland delivers `PixelDelta` (trackpad-style) with `amount_v120 = None`. The `amount()` fix is in place but needs verification.
+- **Window decorations** — kitty draws a title bar (`xdg-decoration` protocol not yet implemented in the compositor).
+- **Mod key** intercepted by Sway when running nested. One solution: toggle mod with a keypress instead of hold.
 
 ## Usage
 
 ```bash
+cd tendril
+RUST_LOG=info ./run.sh       # starts compositor + 3 kitty windows
+# or manually:
 RUST_LOG=info cargo run --bin tendril
 ```
 
-Runs as a nested compositor window. The Wayland socket is auto-selected (`WAYLAND_DISPLAY` is printed in the log).
+Runs as a nested compositor window. The Wayland socket is auto-selected (`WAYLAND_DISPLAY` is printed in the log). Run apps inside with:
+
+```bash
+WAYLAND_DISPLAY=wayland-2 kitty
+```
 
 ## Architecture
 
@@ -52,7 +69,7 @@ graph LR
 
 | Input | Action |
 |---|---|
-| Mod + Scroll | Scroll active column |
+| Mod + Scroll | Scroll active column (needs fix) |
 | Mod + Shift + Scroll | Reorder windows (future) |
 | Pointer click | Focus window under cursor |
 

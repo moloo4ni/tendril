@@ -10,18 +10,20 @@ use smithay::wayland::seat::WaylandFocus;
 
 use crate::state::TendrilState;
 
-const SCANCODE_LEFTMETA: u32 = 125;
-const SCANCODE_RIGHTMETA: u32 = 126;
-const SCANCODE_LEFTSHIFT: u32 = 42;
-const SCANCODE_RIGHTSHIFT: u32 = 54;
+// xkbcommon keycodes = evdev scancode + 8
+const SCANCODE_LEFTMETA: u32 = 133;
+const SCANCODE_RIGHTMETA: u32 = 134;
+const SCANCODE_LEFTSHIFT: u32 = 50;
+const SCANCODE_RIGHTSHIFT: u32 = 62;
 
 pub fn handle_input(state: &mut TendrilState, event: InputEvent<WinitInput>) {
     match event {
         InputEvent::Keyboard { event } => {
             let code = event.key_code();
             let pressed = event.state() == KeyState::Pressed;
+            let raw: u32 = code.into();
 
-            match code.into() {
+            match raw {
                 SCANCODE_LEFTMETA | SCANCODE_RIGHTMETA => {
                     state.mod_pressed = pressed;
                 }
@@ -99,18 +101,18 @@ pub fn handle_input(state: &mut TendrilState, event: InputEvent<WinitInput>) {
             }
         }
         InputEvent::PointerAxis { event } => {
-            if state.mod_pressed && state.shift_pressed {
-                // Mod+Shift+Scroll → reorder window (future)
-            } else if state.mod_pressed {
-                let delta = event
-                    .amount_v120(Axis::Vertical)
-                    .unwrap_or(0.0)
-                    * -0.5;
+            let delta = event
+                .amount(Axis::Vertical)
+                .or_else(|| event.amount_v120(Axis::Vertical).map(|v| v * 0.5))
+                .unwrap_or(0.0);
+
+            if delta != 0.0 {
                 let vp = state.viewport_size.1 as i32;
                 let config = state.config.clone();
                 let col = state.active_column_mut();
                 col.target_scroll_offset += delta;
                 col.clamp_scroll(&config, vp);
+                col.scroll_offset = col.target_scroll_offset;
                 state.needs_redraw = true;
 
                 let ptr = state.pointer_handle.clone();
