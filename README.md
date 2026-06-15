@@ -1,28 +1,28 @@
 # Tendril
 
-Минималистичный Wayland-композитор с фиксированной двухколоночной раскладкой на Rust + Smithay.
+A minimal Wayland compositor with fixed two-column layout, written in Rust with Smithay.
 
-## Статус
+## Status
 
-- **Stage 1** — инициализация: workspace, winit-бэкенд, цикл событий calloop, минимальный рендер
-- **Stage 2** — состояния и геометрия: `Window`, `Column`, `Workspace`, скролл, unit-тесты
-- **Stage 3** — Wayland surface handling: `CompositorHandler`, `XdgShellHandler`, сокет, диспетчеризация клиентов, рендер поверхностей, frame callbacks
+- **Stage 1** — initialization: workspace structure, winit backend, calloop event loop, minimal rendering
+- **Stage 2** — core state & geometry: `Window`, `Column`, `Workspace`, scroll math, unit tests
+- **Stage 3** — Wayland surface handling: `CompositorHandler`, `XdgShellHandler`, listening socket, client dispatch, surface rendering, frame callbacks
 
-## Использование
+## Usage
 
 ```bash
 cargo run --bin tendril
 ```
 
-Композитор запускается вложенным окном (nested). Wayland-сокет выбирается автоматически (`WAYLAND_DISPLAY` выставляется в логе).
+Runs as a nested compositor window. The Wayland socket is auto-selected (`WAYLAND_DISPLAY` is printed in the log).
 
-## Архитектура
+## Architecture
 
-- `tendril/` — ядро композитора
-  - `src/main.rs` — точка входа, `AppState` владеет `Display` + `TendrilState`
-  - `src/state.rs` — `Config`, `Window`, `Column`, `Workspace`, `TendrilState`, геометрия, рендер
-  - `src/shell.rs` — обработчики протоколов (compositor, xdg-shell, shm, seat), `AppClientState`
-  - `src/input.rs` — заглушка (Stage 4)
-  - `src/render.rs` — заглушка
-- `tendril-ipc/` — IPC-библиотека (Stage 5)
-- `tendrilc/` — CLI-клиент (Stage 5)
+- `tendril/` — compositor core
+  - `src/main.rs` — entry point, `AppState` owns `Display` + `TendrilState`
+  - `src/state.rs` — `Config`, `Window`, `Column`, `Workspace`, `TendrilState`, geometry, rendering
+  - `src/shell.rs` — protocol handlers (compositor, xdg-shell, shm, seat), `AppClientState`
+  - `src/input.rs` — placeholder (Stage 4)
+  - `src/render.rs` — placeholder
+- `tendril-ipc/` — IPC library (Stage 5)
+- `tendrilc/` — CLI client (Stage 5)
