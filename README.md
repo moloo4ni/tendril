@@ -28,3 +28,7 @@ Runs as a nested compositor window. The Wayland socket is auto-selected (`WAYLAN
   - `src/render.rs` — placeholder
 - `tendril-ipc/` — IPC library (Stage 5)
 - `tendrilc/` — CLI client (Stage 5)
+
+## License
+
+MPL 2.0 — see [LICENSE](LICENSE).
