@@ -2,7 +2,7 @@
 
 A minimal scroll-driven Wayland compositor with a fixed two-column layout, written in Rust with Smithay.
 
-Windows are arranged in vertical strips per column. Strip scroll is the primary interaction — no floating windows, no stacking, no mouse resize.
+The workspace is a continuous vertical flow of windows inside two fixed columns. Scrolling moves the viewport, not the windows — there is no discrete workspace switching, no floating, no stacking, no mouse resize. Scroll is navigation.
 
 ## Status
 
