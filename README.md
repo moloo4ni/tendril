@@ -1,8 +1,17 @@
 # Tendril
 
-A minimal scroll-driven Wayland compositor with a fixed two-column layout, written in Rust with Smithay.
+A minimal scroll-driven Wayland compositor with a fixed two-column layout, written in Rust with Smithay. Scroll is not an effect — it is the primary navigation model.
 
-The workspace is a continuous vertical flow of windows inside two fixed columns. Scrolling moves the viewport, not the windows — there is no discrete workspace switching, no floating, no stacking, no mouse resize. Scroll is navigation.
+## Interaction model
+
+Tendril separates navigation from window management.
+
+- The workspace is a continuous vertical flow split into two fixed columns.
+- Scrolling moves the viewport through this space, not the windows themselves.
+- Windows are objects inside the flow and can be manipulated independently.
+- Focus follows window selection, not internal application state.
+
+Navigation and manipulation are intentionally distinct concepts.
 
 ## Status
 
