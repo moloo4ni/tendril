@@ -1,6 +1,8 @@
 # Tendril
 
-A minimal Wayland compositor with fixed two-column layout, written in Rust with Smithay.
+A minimal scroll-driven Wayland compositor with a fixed two-column layout, written in Rust with Smithay.
+
+Windows are arranged in vertical strips per column. Strip scroll is the primary interaction — no floating windows, no stacking, no mouse resize.
 
 ## Status
 
