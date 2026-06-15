@@ -20,6 +20,24 @@ Runs as a nested compositor window. The Wayland socket is auto-selected (`WAYLAN
 
 ## Architecture
 
+```mermaid
+graph LR
+    Client[Wayland Client]
+    Socket[Wayland Socket]
+    Dispatch[Protocol Dispatch]
+    Shell[shell.rs]
+    State[TendrilState]
+    Backend[winit Backend]
+    Render[Render Loop]
+
+    Client --> Socket
+    Socket --> Dispatch
+    Dispatch --> Shell
+    Shell --> State
+    State --> Render
+    Backend --> Render
+```
+
 - `tendril/` — compositor core
   - `src/main.rs` — entry point, `AppState` owns `Display` + `TendrilState`
   - `src/state.rs` — `Config`, `Window`, `Column`, `Workspace`, `TendrilState`, geometry, rendering
