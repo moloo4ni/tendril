@@ -35,13 +35,15 @@ static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(0);
 pub struct Config {
     pub window_height: u32,
     pub gaps: u32,
+    pub visible_windows: u32,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             window_height: 500,
-            gaps: 2,
+            gaps: 1,
+            visible_windows: 2,
         }
     }
 }
@@ -104,10 +106,10 @@ impl Column {
         if self.windows.is_empty() {
             return 0.0;
         }
+        let total_h: f64 = self.windows.iter().map(|w| w.height as f64).sum();
         let n = self.windows.len() as f64;
-        let h = config.window_height as f64;
         let g = config.gaps as f64;
-        n * h + (n - 1.0) * g
+        total_h + (n + 1.0) * g
     }
 
     pub fn max_scroll(&self, config: &Config, viewport_height: i32) -> f64 {
@@ -120,6 +122,41 @@ impl Column {
         self.target_scroll_offset = self.target_scroll_offset.clamp(0.0, max);
     }
 
+    pub fn snap_scroll(&mut self, config: &Config, viewport_height: i32) {
+        if self.windows.is_empty() {
+            self.target_scroll_offset = 0.0;
+            return;
+        }
+        let h = self.windows[0].height as f64;
+        let g = config.gaps as f64;
+        let stride = h + g;
+        if stride <= 0.0 {
+            return;
+        }
+        let snaps = (self.target_scroll_offset / stride).round();
+        self.target_scroll_offset = snaps * stride;
+        self.clamp_scroll(config, viewport_height);
+    }
+
+    pub fn snap_scroll_directional(&mut self, config: &Config, viewport_height: i32, delta: f64) {
+        if self.windows.is_empty() {
+            return;
+        }
+        let h = self.windows[0].height as f64;
+        let g = config.gaps as f64;
+        let stride = h + g;
+        if stride <= 0.0 {
+            return;
+        }
+        let snaps = if delta > 0.0 {
+            (self.target_scroll_offset / stride).ceil()
+        } else {
+            (self.target_scroll_offset / stride).floor()
+        };
+        self.target_scroll_offset = snaps * stride;
+        self.clamp_scroll(config, viewport_height);
+    }
+
     pub fn tick_scroll(&mut self, speed: f64, dt: f64) {
         let diff = self.target_scroll_offset - self.scroll_offset;
         if diff.abs() > 0.5 {
@@ -130,7 +167,8 @@ impl Column {
     }
 
     pub fn y_position(&self, index: usize, config: &Config) -> f64 {
-        window_y_position(index, config.window_height, config.gaps, self.scroll_offset)
+        let h = self.windows.first().map(|w| w.height).unwrap_or(config.window_height);
+        window_y_position(index, h, config.gaps, self.scroll_offset)
     }
 
     pub fn windows_visible(
@@ -155,7 +193,7 @@ impl Column {
 }
 
 pub fn window_y_position(index: usize, height: u32, gap: u32, scroll_offset: f64) -> f64 {
-    index as f64 * (height as f64 + gap as f64) - scroll_offset
+    gap as f64 + index as f64 * (height as f64 + gap as f64) - scroll_offset
 }
 
 #[derive(Debug, Clone)]
@@ -306,13 +344,14 @@ impl TendrilState {
         let col_width = (self.viewport_size.0 - self.config.gaps) / 2;
         let vp_h = self.viewport_size.1;
         let gaps = self.config.gaps;
+        let n_visible = self.config.visible_windows.max(1);
 
         for left in [true, false] {
             let n = self.workspace().column(left).windows.len();
             if n == 0 {
                 continue;
             }
-            let h = (vp_h - gaps * (n as u32 + 1)) / n as u32;
+            let h = (vp_h - gaps * (n_visible + 1)) / n_visible;
 
             let idxs: Vec<usize> = (0..n).collect();
             let configures: Vec<_> = idxs.into_iter().map(|idx| {
@@ -372,45 +411,32 @@ impl TendrilState {
         let vp_height = size.h;
         let gaps = self.config.gaps;
 
-        let left_surfaces: Vec<(i32, i32, wl_surface::WlSurface)> = self
-            .workspace()
-            .left_column
-            .windows_visible(&self.config, vp_height)
-            .into_iter()
-            .filter_map(|(i, y)| {
-                let surface = self.workspace().left_column.windows[i]
-                    .toplevel
-                    .wl_surface()?;
-                let x = gaps as i32;
-                Some((x, y as i32, wl_surface::WlSurface::clone(&*surface)))
-            })
-            .collect();
+        let mut all_windows: Vec<wl_surface::WlSurface> = Vec::new();
 
-        let right_surfaces: Vec<(i32, i32, wl_surface::WlSurface)> = self
-            .workspace()
-            .right_column
-            .windows_visible(&self.config, vp_height)
-            .into_iter()
-            .filter_map(|(i, y)| {
-                let surface = self.workspace().right_column.windows[i]
-                    .toplevel
-                    .wl_surface()?;
-                let x = col_width as i32 + gaps as i32;
-                Some((x, y as i32, wl_surface::WlSurface::clone(&*surface)))
-            })
-            .collect();
+        let mut entries: Vec<(i32, i32, f64, f32, wl_surface::WlSurface)> = Vec::new();
 
-        let all_windows: Vec<wl_surface::WlSurface> = self
-            .workspace()
-            .left_column
-            .windows
-            .iter()
-            .chain(self.workspace().right_column.windows.iter())
-            .filter_map(|w| {
-                let surface = w.toplevel.wl_surface()?;
-                Some(wl_surface::WlSurface::clone(&*surface))
-            })
-            .collect();
+        for left in [true, false] {
+            let ws = self.workspace();
+            let col = if left { &ws.left_column } else { &ws.right_column };
+            let base_x = if left { gaps as i32 } else { col_width as i32 + gaps as i32 };
+
+            for (i, y) in col.windows_visible(&self.config, vp_height) {
+                let z = col.windows[i].z_index_offset;
+                let scale = if z > 0.0 { 1.05 } else { 1.0 };
+                if let Some(surface) = col.windows[i].toplevel.wl_surface() {
+                    let s = wl_surface::WlSurface::clone(&*surface);
+                    entries.push((base_x, y as i32, scale, z, s));
+                }
+            }
+
+            for w in col.windows.iter() {
+                if let Some(surface) = w.toplevel.wl_surface() {
+                    all_windows.push(wl_surface::WlSurface::clone(&*surface));
+                }
+            }
+        }
+
+        entries.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
 
         let start = std::time::Instant::now();
 
@@ -424,22 +450,12 @@ impl TendrilState {
             };
 
             let mut elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = Vec::new();
-            for (x, y, surface) in left_surfaces {
+            for (x, y, scale, _, surface) in entries {
                 elements.extend(render_elements_from_surface_tree(
                     renderer,
                     &surface,
                     (x, y),
-                    1.0,
-                    1.0,
-                    Kind::Unspecified,
-                ));
-            }
-            for (x, y, surface) in right_surfaces {
-                elements.extend(render_elements_from_surface_tree(
-                    renderer,
-                    &surface,
-                    (x, y),
-                    1.0,
+                    scale,
                     1.0,
                     Kind::Unspecified,
                 ));
@@ -520,12 +536,12 @@ mod tests {
 
     #[test]
     fn test_window_y_position_free_func() {
-        assert_eq!(window_y_position(0, 500, 8, 0.0), 0.0);
-        assert_eq!(window_y_position(1, 500, 8, 0.0), 508.0);
-        assert_eq!(window_y_position(2, 500, 8, 0.0), 1016.0);
-        assert_eq!(window_y_position(0, 500, 8, 200.0), -200.0);
-        assert_eq!(window_y_position(1, 500, 8, 200.0), 308.0);
-        assert_eq!(window_y_position(2, 500, 8, 200.0), 816.0);
+        assert_eq!(window_y_position(0, 500, 8, 0.0), 8.0);
+        assert_eq!(window_y_position(1, 500, 8, 0.0), 516.0);
+        assert_eq!(window_y_position(2, 500, 8, 0.0), 1024.0);
+        assert_eq!(window_y_position(0, 500, 8, 200.0), -192.0);
+        assert_eq!(window_y_position(1, 500, 8, 200.0), 316.0);
+        assert_eq!(window_y_position(2, 500, 8, 200.0), 824.0);
     }
 
     #[test]
@@ -533,18 +549,19 @@ mod tests {
         let config = Config {
             window_height: 500,
             gaps: 8,
+            visible_windows: 2,
         };
         let mut col = Column::new();
         assert_eq!(col.total_content_height(&config), 0.0);
 
         col.windows.push(Window::new(dummy_window(), 500));
-        assert_eq!(col.total_content_height(&config), 500.0);
+        assert_eq!(col.total_content_height(&config), 516.0);
 
         col.windows.push(Window::new(dummy_window(), 500));
-        assert_eq!(col.total_content_height(&config), 1008.0);
+        assert_eq!(col.total_content_height(&config), 1024.0);
 
         col.windows.push(Window::new(dummy_window(), 500));
-        assert_eq!(col.total_content_height(&config), 1516.0);
+        assert_eq!(col.total_content_height(&config), 1532.0);
     }
 
     #[test]
@@ -552,6 +569,7 @@ mod tests {
         let config = Config {
             window_height: 500,
             gaps: 8,
+            visible_windows: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -560,7 +578,7 @@ mod tests {
 
         col.target_scroll_offset = 1000.0;
         col.clamp_scroll(&config, 1000);
-        assert_eq!(col.target_scroll_offset, 516.0);
+        assert_eq!(col.target_scroll_offset, 532.0);
 
         col.target_scroll_offset = -100.0;
         col.clamp_scroll(&config, 1000);
@@ -572,6 +590,7 @@ mod tests {
         let config = Config {
             window_height: 500,
             gaps: 8,
+            visible_windows: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -581,9 +600,9 @@ mod tests {
 
         let visible = col.windows_visible(&config, 1000);
         // stride = 508
-        // y0 = 0*508 - 200 = -200, bottom = 300  -> visible
-        // y1 = 1*508 - 200 = 308,  bottom = 808  -> visible
-        // y2 = 2*508 - 200 = 816,  bottom = 1316 -> visible
+        // y0 = 8 + 0*508 - 200 = -192, bottom = 308  -> visible
+        // y1 = 8 + 1*508 - 200 = 316,  bottom = 816  -> visible
+        // y2 = 8 + 2*508 - 200 = 824,  bottom = 1324 -> visible
         assert_eq!(visible.len(), 3);
     }
 
@@ -592,6 +611,7 @@ mod tests {
         let config = Config {
             window_height: 500,
             gaps: 8,
+            visible_windows: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -610,12 +630,12 @@ mod tests {
             })
             .collect();
 
-        assert!((positions[0].1 - (-200.0)).abs() < 0.001);
-        assert!((positions[0].2 - 300.0).abs() < 0.001);
-        assert!((positions[1].1 - 308.0).abs() < 0.001);
-        assert!((positions[1].2 - 808.0).abs() < 0.001);
-        assert!((positions[2].1 - 816.0).abs() < 0.001);
-        assert!((positions[2].2 - 1316.0).abs() < 0.001);
+        assert!((positions[0].1 - (-192.0)).abs() < 0.001);
+        assert!((positions[0].2 - 308.0).abs() < 0.001);
+        assert!((positions[1].1 - 316.0).abs() < 0.001);
+        assert!((positions[1].2 - 816.0).abs() < 0.001);
+        assert!((positions[2].1 - 824.0).abs() < 0.001);
+        assert!((positions[2].2 - 1324.0).abs() < 0.001);
 
         let visible: Vec<bool> = col
             .windows
@@ -631,6 +651,7 @@ mod tests {
         let config = Config {
             window_height: 500,
             gaps: 8,
+            visible_windows: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -638,9 +659,9 @@ mod tests {
         }
         col.scroll_offset = 200.0;
 
-        assert!((col.y_position(0, &config) - (-200.0)).abs() < 0.001);
-        assert!((col.y_position(1, &config) - 308.0).abs() < 0.001);
-        assert!((col.y_position(2, &config) - 816.0).abs() < 0.001);
+        assert!((col.y_position(0, &config) - (-192.0)).abs() < 0.001);
+        assert!((col.y_position(1, &config) - 316.0).abs() < 0.001);
+        assert!((col.y_position(2, &config) - 824.0).abs() < 0.001);
     }
 
     #[test]
@@ -650,6 +671,76 @@ mod tests {
         let w3 = Window::new(dummy_window(), 500);
         assert!(w1.id < w2.id);
         assert!(w2.id < w3.id);
+    }
+
+    #[test]
+    fn test_snap_scroll() {
+        let config = Config {
+            window_height: 500,
+            gaps: 8,
+            visible_windows: 2,
+        };
+        let mut col = Column::new();
+        for _ in 0..3 {
+            col.windows.push(Window::new(dummy_window(), 500));
+        }
+        // stride = 508; max_scroll for vp=1000: total=1532, max=532
+        // snap points: 0, 508
+        // 508 exceeds max (532) so 508 is fine; 1016 exceeds max
+
+        col.target_scroll_offset = 300.0;
+        col.snap_scroll(&config, 1000);
+        assert_eq!(col.target_scroll_offset, 508.0);
+
+        col.target_scroll_offset = 200.0;
+        col.snap_scroll(&config, 1000);
+        assert_eq!(col.target_scroll_offset, 0.0);
+
+        col.target_scroll_offset = 250.0;
+        col.snap_scroll(&config, 1000);
+        // 250/508 = 0.492 -> round = 0 -> 0
+        assert_eq!(col.target_scroll_offset, 0.0);
+
+        col.target_scroll_offset = 260.0;
+        col.snap_scroll(&config, 1000);
+        // 260/508 = 0.512 -> round = 1 -> 508
+        assert_eq!(col.target_scroll_offset, 508.0);
+    }
+
+    #[test]
+    fn test_snap_scroll_directional() {
+        let config = Config {
+            window_height: 500,
+            gaps: 8,
+            visible_windows: 2,
+        };
+        let mut col = Column::new();
+        for _ in 0..3 {
+            col.windows.push(Window::new(dummy_window(), 500));
+        }
+        // stride = 508; max_scroll = 532
+        col.target_scroll_offset = 0.0;
+        // positive delta: ceil(0/508) = 0 -> target = 0 (already at snap 0)
+        // but we call it after target_scroll_offset is already set, using the delta
+        col.target_scroll_offset = 10.0;
+        col.snap_scroll_directional(&config, 1000, 10.0);
+        // ceil(10/508) = 1 -> target = 508
+        assert_eq!(col.target_scroll_offset, 508.0);
+
+        col.target_scroll_offset = 500.0;
+        col.snap_scroll_directional(&config, 1000, -10.0);
+        // floor(500/508) = 0 -> target = 0
+        assert_eq!(col.target_scroll_offset, 0.0);
+
+        // small positive delta: should ceil
+        col.target_scroll_offset = 1.0;
+        col.snap_scroll_directional(&config, 1000, 1.0);
+        assert_eq!(col.target_scroll_offset, 508.0);
+
+        // negative delta from zero: floor stays at 0
+        col.target_scroll_offset = 0.0;
+        col.snap_scroll_directional(&config, 1000, -1.0);
+        assert_eq!(col.target_scroll_offset, 0.0);
     }
 
     #[test]
