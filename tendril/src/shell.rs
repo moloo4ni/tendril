@@ -10,7 +10,6 @@ use smithay::delegate_xdg_shell;
 use smithay::desktop::Window as SmithayWindow;
 use smithay::input::{pointer::CursorImageStatus, Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
-use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_seat;
 use smithay::utils::Serial;
 use smithay::wayland::buffer::BufferHandler;
@@ -70,23 +69,14 @@ impl XdgShellHandler for TendrilState {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        let size = self.backend.window_size();
-        let col_width = (size.w as u32 - self.config.gaps) / 2;
-        let window_height = self.config.window_height;
-
-        surface.with_pending_state(|state| {
-            state.states.set(xdg_toplevel::State::Activated);
-            state.size = Some((col_width as i32, window_height as i32).into());
-        });
-        surface.send_configure();
-
         let smithay_window = SmithayWindow::new_wayland_window(surface);
-        let window = Window::new(smithay_window, window_height);
+        let window = Window::new(smithay_window, self.config.window_height);
 
         // add to the column with fewer windows (prefer right on tie)
         let ws = self.workspace_mut();
         let left = ws.left_column.windows.len() < ws.right_column.windows.len();
         ws.column_mut(left).windows.push(window);
+        self.reconfigure_windows();
         self.needs_redraw = true;
     }
 

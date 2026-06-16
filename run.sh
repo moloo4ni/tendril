@@ -21,7 +21,7 @@ echo "Log: $TMPLOG"
 echo "Launching 3 kitty windows..."
 
 for i in 1 2 3; do
-  WAYLAND_DISPLAY=$SOCKET kitty &
+  WAYLAND_DISPLAY=$SOCKET kitty --override hide_window_decorations=yes &
   sleep 0.3
 done
 

@@ -304,17 +304,30 @@ impl TendrilState {
 
     pub fn reconfigure_windows(&mut self) {
         let col_width = (self.viewport_size.0 - self.config.gaps) / 2;
-        let win_h = self.config.window_height;
+        let vp_h = self.viewport_size.1;
+        let gaps = self.config.gaps;
+
         for left in [true, false] {
-            let idxs: Vec<usize> = (0..self.workspace().column(left).windows.len()).collect();
-            for idx in idxs {
-                let toplevel = self.workspace_mut().column_mut(left).windows[idx]
-                    .toplevel
-                    .toplevel()
-                    .cloned();
-                if let Some(tl) = toplevel {
+            let n = self.workspace().column(left).windows.len();
+            if n == 0 {
+                continue;
+            }
+            let h = (vp_h - gaps * (n as u32 + 1)) / n as u32;
+
+            let idxs: Vec<usize> = (0..n).collect();
+            let configures: Vec<_> = idxs.into_iter().map(|idx| {
+                    let ws = self.workspace_mut();
+                    let col = ws.column_mut(left);
+                    col.windows[idx].height = h;
+                    let toplevel = col.windows[idx].toplevel.toplevel().cloned();
+                    (toplevel, h)
+                })
+                .collect();
+
+            for (tl, h) in configures {
+                if let Some(tl) = tl {
                     tl.with_pending_state(|state| {
-                        state.size = Some((col_width as i32, win_h as i32).into());
+                        state.size = Some((col_width as i32, h as i32).into());
                     });
                     tl.send_configure();
                 }
