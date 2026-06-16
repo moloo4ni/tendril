@@ -18,9 +18,9 @@ done
 
 echo "tendril compositor ready on $SOCKET (PID $COMPOSITOR_PID)"
 echo "Log: $TMPLOG"
-echo "Launching 3 kitty windows..."
+echo "Launching 6 kitty windows (3 left, 3 right)..."
 
-for i in 1 2 3; do
+for i in 1 2 3 4 5 6; do
   WAYLAND_DISPLAY=$SOCKET kitty --override hide_window_decorations=yes &
   sleep 0.3
 done

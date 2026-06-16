@@ -41,7 +41,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             window_height: 500,
-            gaps: 8,
+            gaps: 2,
         }
     }
 }
