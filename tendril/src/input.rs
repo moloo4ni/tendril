@@ -249,9 +249,9 @@ fn scroll_strip(state: &mut TendrilState, delta: f64, is_wheel: bool) {
     } else {
         col.snap_scroll(&config, vp);
     }
-    col.scroll_offset = col.target_scroll_offset;
-    log::info!("scroll_strip: offset={}", col.scroll_offset);
+    log::info!("scroll_strip: target_offset={}", col.target_scroll_offset);
     state.needs_redraw = true;
+    state.damage_full = true;
 }
 
 fn scroll_strip_smooth(state: &mut TendrilState, amount: f64) {
@@ -263,8 +263,7 @@ fn scroll_strip_smooth(state: &mut TendrilState, amount: f64) {
     col.target_scroll_offset += amount;
     col.clamp_scroll(&config, vp);
     col.snap_scroll(&config, vp);
-    col.scroll_offset = col.target_scroll_offset;
-    log::info!("scroll_strip_smooth: offset={}", col.scroll_offset);
+    log::info!("scroll_strip_smooth: target_offset={}", col.target_scroll_offset);
     state.needs_redraw = true;
 }
 
@@ -284,14 +283,17 @@ fn reorder_impl(col: &mut crate::state::Column, direction: f64) {
     let Some(idx) = col.focused_idx else { return };
     for w in col.windows.iter_mut() {
         w.z_index_offset = 0.0;
+        w.z_anim_delay = 0.0;
     }
     if direction > 0.0 && idx < col.windows.len() - 1 {
         col.windows.swap(idx, idx + 1);
         col.focused_idx = Some(idx + 1);
         col.windows[idx + 1].z_index_offset = 10.0;
+        col.windows[idx + 1].z_anim_delay = 0.5;
     } else if direction < 0.0 && idx > 0 {
         col.windows.swap(idx, idx - 1);
         col.focused_idx = Some(idx - 1);
         col.windows[idx - 1].z_index_offset = 10.0;
+        col.windows[idx - 1].z_anim_delay = 0.5;
     }
 }

@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::winit::{self, WinitEvent};
+use smithay::desktop::PopupManager;
 use smithay::desktop::Window as SmithayWindow;
 use smithay::input::keyboard::KeyboardHandle;
 use smithay::input::pointer::PointerHandle;
@@ -277,6 +278,7 @@ pub struct TendrilState {
     pub pointer_handle: Option<PointerHandle<Self>>,
     pub last_frame_time: Option<std::time::Instant>,
     pub damage_full: bool,
+    pub popup_manager: PopupManager,
 }
 
 impl TendrilState {
@@ -318,6 +320,7 @@ impl TendrilState {
             pointer_handle,
             last_frame_time: None,
             damage_full: true,
+            popup_manager: PopupManager::default(),
         }
     }
 
@@ -430,6 +433,8 @@ impl TendrilState {
     }
 
     pub fn idle(&mut self) {
+        self.popup_manager.cleanup();
+
         let now = std::time::Instant::now();
         let dt = self
             .last_frame_time
@@ -526,6 +531,24 @@ impl TendrilState {
             for w in col.windows.iter() {
                 if let Some(surface) = w.toplevel.wl_surface() {
                     all_windows.push(wl_surface::WlSurface::clone(&*surface));
+                }
+            }
+        }
+
+        // Add popup surfaces on top of their parent toplevels
+        for left in [true, false] {
+            let ws = self.workspace();
+            let col = if left { &ws.left_column } else { &ws.right_column };
+            let base_x = if left { gaps as i32 } else { col_width as i32 + gaps as i32 };
+
+            for (i, y) in col.windows_visible(&self.config, vp_height) {
+                if let Some(surface) = col.windows[i].toplevel.wl_surface() {
+                    for (popup, offset) in PopupManager::popups_for_surface(&surface) {
+                        let popup_surface = popup.wl_surface().clone();
+                        let pos = (base_x + offset.x, y as i32 + offset.y);
+                        entries.push((pos.0, pos.1, 1.0, 100.0, popup_surface.clone()));
+                        all_windows.push(popup_surface);
+                    }
                 }
             }
         }

@@ -7,11 +7,11 @@ use smithay::delegate_seat;
 use smithay::delegate_shm;
 use smithay::delegate_xdg_decoration;
 use smithay::delegate_xdg_shell;
-use smithay::desktop::Window as SmithayWindow;
+use smithay::desktop::{PopupKind, Window as SmithayWindow};
 use smithay::input::{pointer::CursorImageStatus, Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use smithay::reexports::wayland_server::protocol::wl_seat;
-use smithay::utils::Serial;
+use smithay::utils::{Rectangle, Serial};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     CompositorClientState, CompositorHandler, CompositorState,
@@ -59,7 +59,9 @@ impl CompositorHandler for TendrilState {
 
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
+        self.popup_manager.commit(surface);
         self.needs_redraw = true;
+        self.damage_full = true;
     }
 }
 
@@ -78,20 +80,76 @@ impl XdgShellHandler for TendrilState {
         ws.column_mut(left).windows.push(window);
         self.reconfigure_windows();
         self.needs_redraw = true;
+        self.damage_full = true;
     }
 
-    fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {
-        log::warn!("popup surfaces not yet supported");
+    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+        let output_size = self.backend.window_size();
+        let target_rect = Rectangle::<i32, smithay::utils::Logical> {
+            loc: (0, 0).into(),
+            size: (output_size.w, output_size.h).into(),
+        };
+        let geometry = positioner.get_unconstrained_geometry(target_rect);
+
+        surface.with_pending_state(|state| {
+            state.geometry = geometry;
+        });
+        if let Err(e) = surface.send_configure() {
+            log::warn!("failed to configure popup: {e:?}");
+            return;
+        }
+
+        let kind = PopupKind::Xdg(surface);
+        if let Err(e) = self.popup_manager.track_popup(kind) {
+            log::warn!("failed to track popup: {e:?}");
+        }
+
+        self.needs_redraw = true;
+        self.damage_full = true;
     }
 
-    fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {}
+    fn grab(&mut self, surface: PopupSurface, _seat: wl_seat::WlSeat, serial: Serial) {
+        let kind = PopupKind::Xdg(surface);
+        let Ok(root_surface) = smithay::desktop::find_popup_root_surface(&kind) else { return };
+
+        let Ok(popup_grab) = self.popup_manager.grab_popup::<Self>(
+            root_surface,
+            kind,
+            &self.seat,
+            serial,
+        ) else {
+            return;
+        };
+
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            use smithay::desktop::PopupKeyboardGrab;
+            keyboard.set_grab(self, PopupKeyboardGrab::new(&popup_grab), serial);
+        }
+        if let Some(pointer) = self.seat.get_pointer() {
+            use smithay::desktop::PopupPointerGrab;
+            use smithay::input::pointer::Focus;
+            pointer.set_grab(self, PopupPointerGrab::new(&popup_grab), serial, Focus::Keep);
+        }
+    }
 
     fn reposition_request(
         &mut self,
-        _surface: PopupSurface,
-        _positioner: PositionerState,
-        _token: u32,
+        surface: PopupSurface,
+        positioner: PositionerState,
+        token: u32,
     ) {
+        let output_size = self.backend.window_size();
+        let target_rect = Rectangle::<i32, smithay::utils::Logical> {
+            loc: (0, 0).into(),
+            size: (output_size.w, output_size.h).into(),
+        };
+        let geometry = positioner.get_unconstrained_geometry(target_rect);
+
+        surface.with_pending_state(|state| {
+            state.geometry = geometry;
+        });
+        surface.send_repositioned(token);
+        self.needs_redraw = true;
     }
 }
 

@@ -56,19 +56,17 @@ Unix socket JSON-RPC 2.0 protocol and CLI client.
 
 Smooth LERP scroll, damage tracking, persistent Z-effect.
 
-- [ ] Wire `Column::tick_scroll()` into the idle loop for smooth scrolling
-- [ ] Track damage regions instead of full-viewport redraw
-- [ ] Persistent Z-effect animation (fade scale back to 1.0 after delay)
-- [ ] Move rendering pipeline from `state.rs` into `render.rs`
-- [ ] Remove `#![allow(dead_code)]` from state.rs and render.rs
+- [x] Wire `Column::tick_scroll()` into the idle loop for smooth scrolling
+- [x] Track damage regions instead of full-viewport redraw
+- [x] Persistent Z-effect animation (fade scale back to 1.0 after 500ms delay)
+- [x] Move rendering pipeline from `state.rs` into `render.rs`
+- [x] Remove `#![allow(dead_code)]` from state.rs and render.rs
 
 ## Known Issues
 
 - **Mod+Scroll (mouse wheel) broken under Sway** — the host compositor captures
   the Mod key before Tendril sees it. Trackpad scroll under Mod may work with
   larger gestures. Workaround: configure Sway with a different `$mod`.
-- **Z-index offset cleared each frame** — `z_index_offset` is reset every
-  redraw; persistent visual feedback during reorder needs the Stage 6 idle loop.
 - **Serial always 0** — `TendrilState::serial()` returns `Serial::from(0)`
   unconditionally. Should use real serials from smithay.
 - **Popup surfaces not supported** — `XdgShellHandler::new_popup` logs a warning
