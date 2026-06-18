@@ -50,7 +50,11 @@ Unix socket JSON-RPC 2.0 protocol and CLI client.
 **IPC methods provided:**
 - `list-windows` — list all windows with id, workspace, column, position
 - `get-config` — show current compositor configuration
-- `scroll`, `focus-window`, `set-config`, `get-workspaces`, `switch-workspace` — defined in protocol, not yet implemented
+- `scroll` — scroll a column by delta
+- `focus-window` — focus a window by ID
+- `set-config` — update compositor configuration at runtime
+- `get-workspaces` — list all workspaces with their windows
+- `switch-workspace` — switch to a workspace
 
 ## Stage 6 — Rendering & Animations
 
@@ -72,6 +76,4 @@ Smooth LERP scroll, damage tracking, persistent Z-effect.
 
 - KMS/DRM backend (native, non-nested)
 - Multi-monitor support
-- Dynamic column count (three or more columns via config)
-- Config hot-reload over IPC
 - Layer-shell protocol support (bars, overlays)

@@ -1,15 +1,16 @@
 # Tendril
 
-A scroll-driven Wayland compositor with a fixed two-column layout, written in Rust with [Smithay].
+A scroll-driven Wayland compositor with a configurable multi-column layout, written in Rust with [Smithay].
 
 [Smithay]: https://github.com/Smithay/Smithay
 
 ## How It Works
 
-Windows are arranged in two side-by-side columns. Each column acts as a vertical strip
-that you scroll through — windows don't overlap or resize; they stay at a fixed height
-and the strip moves under the viewport. Scroll the strip with `Mod+Scroll`, navigate
-between windows with `h`/`j`/`k`/`l`, and reorder them with `Mod+Shift` + arrows.
+Windows are arranged in side-by-side columns (configurable count, default 2). Each column
+acts as a vertical strip that you scroll through — windows don't overlap or resize; they
+stay at a fixed height and the strip moves under the viewport. Scroll the strip with
+`Mod+Scroll`, navigate between windows with `h`/`j`/`k`/`l`, and reorder them with
+`Mod+Shift` + arrows.
 
 Tendril runs as a nested compositor inside an existing X11 or Wayland session using the
 `winit` backend. This lets you develop and test without leaving your current desktop.
@@ -17,12 +18,12 @@ A native KMS/DRM mode is planned.
 
 ## Features
 
-- Two-column tiling — new windows are placed in the less-populated column
+- Multi-column tiling (configurable via `column_count`) — new windows are placed in the least-populated column
 - Scroll-driven navigation — scroll the strip (Mod+wheel) or move focus with hjkl
 - Keyboard-driven window management — focus and reorder without touching the mouse
 - Nested mode — runs inside your existing X11/Wayland session via winit
 - IPC & CLI — Unix socket JSON-RPC 2.0 protocol and `tendrilc` command-line client
-- TOML configuration — `~/.config/tendril/config.toml`
+- TOML configuration — `~/.config/tendril/config.toml` with auto hot-reload on file change
 - Z-effect — reordered windows get a subtle scale bump (`scale=1.05`) that fades after 500ms
 - Smooth LERP scroll animation — per-column spring-like interpolation
 - Popup surface support — menus, dropdowns, tooltips work (GTK/Qt)
@@ -82,8 +83,8 @@ Or use `./run.sh` to start the compositor with six `kitty` terminals automatical
 
 | Input | Action |
 |---|---|
-| `Mod+h` / `Mod+←` | Focus left column |
-| `Mod+l` / `Mod+→` | Focus right column |
+| `Mod+h` / `Mod+←` | Focus previous column (wrapping) |
+| `Mod+l` / `Mod+→` | Focus next column (wrapping) |
 | `Mod+j` / `Mod+↓` | Focus next window down |
 | `Mod+k` / `Mod+↑` | Focus previous window up |
 | `Mod+Shift+h` / `Mod+Shift+←` | Move window left (up in list) |
