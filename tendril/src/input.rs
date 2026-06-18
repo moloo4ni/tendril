@@ -44,7 +44,7 @@ pub fn handle_input(state: &mut TendrilState, event: InputEvent<WinitInput>) {
                 }
                 SCANCODE_H | SCANCODE_LEFT => {
                     if pressed && state.mod_pressed && !state.shift_pressed {
-                        focus_column(state, true);
+                        focus_prev_column(state);
                     } else if pressed && state.mod_pressed && state.shift_pressed {
                         keyboard_reorder(state, -1.0);
                     } else {
@@ -53,7 +53,7 @@ pub fn handle_input(state: &mut TendrilState, event: InputEvent<WinitInput>) {
                 }
                 SCANCODE_L | SCANCODE_RIGHT => {
                     if pressed && state.mod_pressed && !state.shift_pressed {
-                        focus_column(state, false);
+                        focus_next_column(state);
                     } else if pressed && state.mod_pressed && state.shift_pressed {
                         keyboard_reorder(state, 1.0);
                     } else {
@@ -197,11 +197,27 @@ fn forward_key(state: &mut TendrilState, code: impl Into<Keycode>, event: impl K
     }
 }
 
-fn focus_column(state: &mut TendrilState, left: bool) {
+fn focus_prev_column(state: &mut TendrilState) {
+    let n_cols = state.workspace().n_cols();
+    if n_cols < 2 { return; }
+    let cur = state.workspace().active_column;
+    let next = (cur + n_cols - 1) % n_cols;
+    focus_column_index(state, next);
+}
+
+fn focus_next_column(state: &mut TendrilState) {
+    let n_cols = state.workspace().n_cols();
+    if n_cols < 2 { return; }
+    let cur = state.workspace().active_column;
+    let next = (cur + 1) % n_cols;
+    focus_column_index(state, next);
+}
+
+fn focus_column_index(state: &mut TendrilState, col_idx: usize) {
     let surface = {
         let ws = state.workspace_mut();
-        ws.active_column = left;
-        let col = if left { &mut ws.left_column } else { &mut ws.right_column };
+        ws.active_column = col_idx;
+        let col = &mut ws.columns[col_idx];
         if col.windows.is_empty() { return; }
         let idx = col.focused_idx.unwrap_or(0).min(col.windows.len() - 1);
         col.focused_idx = Some(idx);

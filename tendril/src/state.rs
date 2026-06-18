@@ -26,7 +26,11 @@ pub struct Config {
     pub window_height: u32,
     pub gaps: u32,
     pub visible_windows: u32,
+    #[serde(default = "default_column_count")]
+    pub column_count: u32,
 }
+
+fn default_column_count() -> u32 { 2 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -34,6 +38,7 @@ impl Default for Config {
             window_height: 500,
             gaps: 1,
             visible_windows: 2,
+            column_count: 2,
         }
     }
 }
@@ -221,35 +226,47 @@ pub fn window_y_position(index: usize, height: u32, gap: u32, scroll_offset: f64
 #[derive(Debug, Clone)]
 pub struct Workspace {
     pub id: u8,
-    pub left_column: Column,
-    pub right_column: Column,
-    pub active_column: bool,
+    pub columns: Vec<Column>,
+    pub active_column: usize,
 }
 
 impl Workspace {
-    pub fn new(id: u8) -> Self {
+    pub fn new(id: u8, column_count: usize) -> Self {
+        let mut columns = Vec::with_capacity(column_count);
+        for _ in 0..column_count {
+            columns.push(Column::new());
+        }
         Workspace {
             id,
-            left_column: Column::new(),
-            right_column: Column::new(),
-            active_column: true,
+            columns,
+            active_column: 0,
         }
     }
 
-    pub fn column_mut(&mut self, left: bool) -> &mut Column {
-        if left {
-            &mut self.left_column
-        } else {
-            &mut self.right_column
-        }
+    pub fn column_mut(&mut self, col_idx: usize) -> &mut Column {
+        &mut self.columns[col_idx]
     }
 
-    pub fn column(&self, left: bool) -> &Column {
-        if left {
-            &self.left_column
-        } else {
-            &self.right_column
-        }
+    pub fn column(&self, col_idx: usize) -> &Column {
+        &self.columns[col_idx]
+    }
+
+    pub fn n_cols(&self) -> usize {
+        self.columns.len()
+    }
+}
+
+fn config_file_mtime() -> (Option<std::path::PathBuf>, Option<std::time::SystemTime>) {
+    let config_dir = std::env::var("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            std::path::PathBuf::from(home).join(".config")
+        });
+    let path = config_dir.join("tendril").join("config.toml");
+    match std::fs::metadata(&path) {
+        Ok(meta) => (Some(path), meta.modified().ok()),
+        Err(_) => (Some(path), None),
     }
 }
 
@@ -259,6 +276,8 @@ pub struct TendrilState {
     pub workspaces: Vec<Workspace>,
     pub active_workspace: usize,
     pub config: Config,
+    config_path: Option<std::path::PathBuf>,
+    config_mtime: Option<std::time::SystemTime>,
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     #[allow(dead_code)]
@@ -297,13 +316,15 @@ impl TendrilState {
         pointer_handle: Option<PointerHandle<Self>>,
     ) -> Self {
         let size = backend.window_size();
-        let workspaces = (0..5).map(Workspace::new).collect();
+        let config = Config::load();
+        let workspaces = (0..5).map(|i| Workspace::new(i, config.column_count as usize)).collect();
+        let (config_path, config_mtime) = config_file_mtime();
         TendrilState {
             backend,
             needs_redraw: false,
             workspaces,
             active_workspace: 0,
-            config: Config::default(),
+            config,
             compositor_state,
             xdg_shell_state,
             decoration_state,
@@ -321,6 +342,8 @@ impl TendrilState {
             last_frame_time: None,
             damage_full: true,
             popup_manager: PopupManager::default(),
+            config_path,
+            config_mtime,
         }
     }
 
@@ -333,22 +356,14 @@ impl TendrilState {
     }
 
     pub fn active_column_mut(&mut self) -> &mut Column {
-        let ws = self.workspace_mut();
-        if ws.active_column {
-            &mut ws.left_column
-        } else {
-            &mut ws.right_column
-        }
+        let idx = self.workspace().active_column;
+        self.workspace_mut().column_mut(idx)
     }
 
     #[allow(dead_code)]
     pub fn active_column(&self) -> &Column {
         let ws = self.workspace();
-        if ws.active_column {
-            &ws.left_column
-        } else {
-            &ws.right_column
-        }
+        ws.column(ws.active_column)
     }
 
     pub fn handle_event(&mut self, event: WinitEvent) {
@@ -375,13 +390,14 @@ impl TendrilState {
     }
 
     pub fn reconfigure_windows(&mut self) {
-        let col_width = (self.viewport_size.0 - self.config.gaps) / 2;
-        let vp_h = self.viewport_size.1;
+        let n_cols = self.config.column_count.max(1);
         let gaps = self.config.gaps;
+        let col_width = (self.viewport_size.0 - gaps * (n_cols + 1)) / n_cols;
+        let vp_h = self.viewport_size.1;
         let n_visible = self.config.visible_windows.max(1);
 
-        for left in [true, false] {
-            let n = self.workspace().column(left).windows.len();
+        for col_idx in 0..n_cols as usize {
+            let n = self.workspace().column(col_idx).windows.len();
             if n == 0 {
                 continue;
             }
@@ -390,7 +406,7 @@ impl TendrilState {
             let idxs: Vec<usize> = (0..n).collect();
             let configures: Vec<_> = idxs.into_iter().map(|idx| {
                     let ws = self.workspace_mut();
-                    let col = ws.column_mut(left);
+                    let col = ws.column_mut(col_idx);
                     col.windows[idx].height = h;
                     let toplevel = col.windows[idx].toplevel.toplevel().cloned();
                     (toplevel, h)
@@ -408,20 +424,21 @@ impl TendrilState {
         }
     }
 
-    pub fn window_at(&self, x: f64, y: f64) -> Option<(bool, usize)> {
-        let col_width = (self.viewport_size.0 - self.config.gaps) / 2;
+    pub fn window_at(&self, x: f64, y: f64) -> Option<(usize, usize)> {
+        let n_cols = self.config.column_count.max(1) as usize;
         let gaps = self.config.gaps as f64;
-        for left in [true, false] {
-            let col = self.workspace().column(left);
-            let col_x = if left { gaps } else { col_width as f64 + gaps };
+        let col_width = (self.viewport_size.0 as f64 - gaps * (n_cols as f64 + 1.0)) / n_cols as f64;
+        for col_idx in 0..n_cols {
+            let col = self.workspace().column(col_idx);
+            let col_x = gaps + col_idx as f64 * (col_width + gaps);
             for (i, w) in col.windows.iter().enumerate() {
                 let wy = w.y_position(i, &self.config, col.scroll_offset);
                 if x >= col_x
-                    && x < col_x + col_width as f64
+                    && x < col_x + col_width
                     && y >= wy
                     && y < wy + w.height as f64
                 {
-                    return Some((left, i));
+                    return Some((col_idx, i));
                 }
             }
         }
@@ -434,12 +451,12 @@ impl TendrilState {
 
     pub fn focus_window(&mut self, id: usize) -> bool {
         for (ws_idx, ws) in self.workspaces.iter_mut().enumerate() {
-            for left in [true, false] {
-                let col = ws.column_mut(left);
+            for col_idx in 0..ws.n_cols() {
+                let col = ws.column_mut(col_idx);
                 if let Some(idx) = col.windows.iter().position(|w| w.id == id) {
                     col.focused_idx = Some(idx);
                     self.active_workspace = ws_idx;
-                    ws.active_column = left;
+                    ws.active_column = col_idx;
                     self.needs_redraw = true;
                     return true;
                 }
@@ -459,27 +476,64 @@ impl TendrilState {
         }
     }
 
-    pub fn scroll_column(&mut self, left: bool, delta: f64) -> f64 {
+    pub fn scroll_column(&mut self, col_idx: usize, delta: f64) -> f64 {
         let config = self.config.clone();
         let vp_h = self.viewport_size.1 as i32;
-        let col = if left {
-            &mut self.workspace_mut().left_column
-        } else {
-            &mut self.workspace_mut().right_column
-        };
+        let col = self.workspace_mut().column_mut(col_idx);
         col.target_scroll_offset += delta;
         col.clamp_scroll(&config, vp_h);
         col.target_scroll_offset
     }
 
     pub fn set_config(&mut self, config: Config) {
+        let old_n_cols = self.config.column_count;
         self.config = config;
+        if self.config.column_count != old_n_cols {
+            for ws in self.workspaces.iter_mut() {
+                let n = self.config.column_count.max(1) as usize;
+                if ws.columns.len() != n {
+                    let old_active = ws.active_column.min(n.saturating_sub(1));
+                    let mut new_cols = Vec::with_capacity(n);
+                    for i in 0..n {
+                        new_cols.push(if i < ws.columns.len() {
+                            // swap out the old column
+                            let mut col = Column::new();
+                            std::mem::swap(&mut col, &mut ws.columns[i]);
+                            col
+                        } else {
+                            Column::new()
+                        });
+                    }
+                    ws.columns = new_cols;
+                    ws.active_column = old_active;
+                }
+            }
+        }
         self.reconfigure_windows();
         self.needs_redraw = true;
         self.damage_full = true;
     }
 
+    fn try_reload_config(&mut self) {
+        let Some(ref path) = self.config_path else { return };
+        let Ok(meta) = std::fs::metadata(path) else { return };
+        let Ok(new_mtime) = meta.modified() else { return };
+        let changed = self.config_mtime.map(|t| t != new_mtime).unwrap_or(true);
+        if !changed { return; }
+        self.config_mtime = Some(new_mtime);
+        if let Ok(content) = std::fs::read_to_string(path) {
+            match toml::from_str(&content) {
+                Ok(config) => {
+                    log::info!("config file changed, reloading");
+                    self.set_config(config);
+                }
+                Err(e) => log::warn!("failed to parse changed config: {e}"),
+            }
+        }
+    }
+
     pub fn idle(&mut self) {
+        self.try_reload_config();
         self.popup_manager.cleanup();
 
         let now = std::time::Instant::now();
@@ -491,7 +545,7 @@ impl TendrilState {
 
         // Advance all scroll animations
         for ws in self.workspaces.iter_mut() {
-            for col in [&mut ws.left_column, &mut ws.right_column] {
+            for col in ws.columns.iter_mut() {
                 let diff = (col.target_scroll_offset - col.scroll_offset).abs();
                 if diff > 0.5 {
                     col.tick_scroll(10.0, dt);
@@ -504,7 +558,7 @@ impl TendrilState {
         // Tick z-effect animations
         let mut z_animating = false;
         for ws in self.workspaces.iter_mut() {
-            for col in [&mut ws.left_column, &mut ws.right_column] {
+            for col in ws.columns.iter_mut() {
                 for w in col.windows.iter_mut() {
                     if w.z_anim_delay > 0.0 {
                         w.z_anim_delay -= dt;
@@ -528,8 +582,7 @@ impl TendrilState {
 
         if !self.needs_redraw {
             let animating = self.workspaces.iter().any(|ws| {
-                ws.left_column.scroll_offset != ws.left_column.target_scroll_offset
-                    || ws.right_column.scroll_offset != ws.right_column.target_scroll_offset
+                ws.columns.iter().any(|col| col.scroll_offset != col.target_scroll_offset)
             });
             if !animating && !z_animating {
                 return;
@@ -538,33 +591,33 @@ impl TendrilState {
         self.needs_redraw = false;
 
         let size = self.backend.window_size();
+        let n_cols = self.config.column_count.max(1) as usize;
+        let gaps = self.config.gaps;
+
         let damage = if self.damage_full {
             self.damage_full = false;
             vec![Rectangle::from_size(size)]
         } else {
-            let col_width = (size.w as u32 - self.config.gaps) / 2;
-            let gaps = self.config.gaps as i32;
-            vec![
-                Rectangle::new(Point::new(0, 0), Size::new(col_width as i32 + gaps, size.h)),
-                Rectangle::new(
-                    Point::new(col_width as i32, 0),
-                    Size::new(col_width as i32 + gaps, size.h),
-                ),
-            ]
+            let mut rects = Vec::with_capacity(n_cols);
+            let col_width = ((size.w as u32 - gaps * (n_cols as u32 + 1)) / n_cols as u32) as i32;
+            for col_idx in 0..n_cols {
+                let x = (gaps as i32) + col_idx as i32 * (col_width + gaps as i32);
+                rects.push(Rectangle::new(Point::new(x, 0), Size::new(col_width + gaps as i32, size.h)));
+            }
+            rects
         };
 
-        let col_width = (size.w as u32 - self.config.gaps) / 2;
+        let col_width = (size.w as u32 - gaps * (n_cols as u32 + 1)) / n_cols as u32;
         let vp_height = size.h;
-        let gaps = self.config.gaps;
 
         let mut all_windows: Vec<wl_surface::WlSurface> = Vec::new();
 
         let mut entries: Vec<(i32, i32, f64, f32, wl_surface::WlSurface)> = Vec::new();
 
-        for left in [true, false] {
+        for col_idx in 0..n_cols {
             let ws = self.workspace();
-            let col = if left { &ws.left_column } else { &ws.right_column };
-            let base_x = if left { gaps as i32 } else { col_width as i32 + gaps as i32 };
+            let col = ws.column(col_idx);
+            let base_x = gaps as i32 + col_idx as i32 * (col_width as i32 + gaps as i32);
 
             for (i, y) in col.windows_visible(&self.config, vp_height) {
                 let z = col.windows[i].z_index_offset;
@@ -583,10 +636,10 @@ impl TendrilState {
         }
 
         // Add popup surfaces on top of their parent toplevels
-        for left in [true, false] {
+        for col_idx in 0..n_cols {
             let ws = self.workspace();
-            let col = if left { &ws.left_column } else { &ws.right_column };
-            let base_x = if left { gaps as i32 } else { col_width as i32 + gaps as i32 };
+            let col = ws.column(col_idx);
+            let base_x = gaps as i32 + col_idx as i32 * (col_width as i32 + gaps as i32);
 
             for (i, y) in col.windows_visible(&self.config, vp_height) {
                 if let Some(surface) = col.windows[i].toplevel.wl_surface() {
@@ -640,6 +693,7 @@ mod tests {
             window_height: 500,
             gaps: 8,
             visible_windows: 2,
+            column_count: 2,
         };
         let mut col = Column::new();
         assert_eq!(col.total_content_height(&config), 0.0);
@@ -660,6 +714,7 @@ mod tests {
             window_height: 500,
             gaps: 8,
             visible_windows: 2,
+            column_count: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -681,6 +736,7 @@ mod tests {
             window_height: 500,
             gaps: 8,
             visible_windows: 2,
+            column_count: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -702,6 +758,7 @@ mod tests {
             window_height: 500,
             gaps: 8,
             visible_windows: 2,
+            column_count: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -742,6 +799,7 @@ mod tests {
             window_height: 500,
             gaps: 8,
             visible_windows: 2,
+            column_count: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -769,6 +827,7 @@ mod tests {
             window_height: 500,
             gaps: 8,
             visible_windows: 2,
+            column_count: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -803,6 +862,7 @@ mod tests {
             window_height: 500,
             gaps: 8,
             visible_windows: 2,
+            column_count: 2,
         };
         let mut col = Column::new();
         for _ in 0..3 {
@@ -835,12 +895,12 @@ mod tests {
 
     #[test]
     fn test_workspace_columns() {
-        let mut ws = Workspace::new(0);
-        assert!(ws.active_column);
-        ws.column_mut(true)
+        let mut ws = Workspace::new(0, 2);
+        assert_eq!(ws.active_column, 0);
+        ws.column_mut(0)
             .windows
             .push(Window::new(dummy_window(), 500));
-        assert_eq!(ws.column(true).windows.len(), 1);
-        assert!(ws.column(false).windows.is_empty());
+        assert_eq!(ws.column(0).windows.len(), 1);
+        assert!(ws.column(1).windows.is_empty());
     }
 }

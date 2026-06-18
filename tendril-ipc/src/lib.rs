@@ -90,7 +90,7 @@ pub const METHOD_SWITCH_WORKSPACE: &str = "switch-workspace";
 pub struct WindowInfo {
     pub id: usize,
     pub workspace_id: u8,
-    pub column: bool,
+    pub column: usize,
     pub index: usize,
     pub y_position: f64,
     pub height: u32,
@@ -107,7 +107,7 @@ pub struct ListWindowsResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScrollParams {
     pub delta: f64,
-    pub left: Option<bool>,
+    pub column: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,7 +129,11 @@ pub struct ConfigData {
     pub window_height: u32,
     pub gaps: u32,
     pub visible_windows: u32,
+    #[serde(default = "default_column_count")]
+    pub column_count: u32,
 }
+
+fn default_column_count() -> u32 { 2 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetConfigParams {

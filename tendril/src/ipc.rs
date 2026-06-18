@@ -151,8 +151,8 @@ fn handle_list_windows(id: u64, state: &Rc<RefCell<TendrilState>>) -> JsonRpcRes
     let mut windows = Vec::new();
 
     for ws in state.workspaces.iter() {
-        for left in [true, false] {
-            let col = ws.column(left);
+        for col_idx in 0..ws.n_cols() {
+            let col = ws.column(col_idx);
             for (i, w) in col.windows.iter().enumerate() {
                 let y = w.y_position(i, &state.config, col.scroll_offset);
                 let title = w.toplevel
@@ -173,7 +173,7 @@ fn handle_list_windows(id: u64, state: &Rc<RefCell<TendrilState>>) -> JsonRpcRes
                 windows.push(WindowInfo {
                     id: w.id,
                     workspace_id: ws.id,
-                    column: left,
+                    column: col_idx,
                     index: i,
                     y_position: y,
                     height: w.height,
@@ -199,6 +199,7 @@ fn handle_get_config(id: u64, state: &Rc<RefCell<TendrilState>>) -> JsonRpcRespo
         window_height: state.config.window_height,
         gaps: state.config.gaps,
         visible_windows: state.config.visible_windows,
+        column_count: state.config.column_count,
     };
     JsonRpcResponse::success(id, serde_json::to_value(config).unwrap())
 }
@@ -213,8 +214,8 @@ fn handle_scroll(id: u64, state: &Rc<RefCell<TendrilState>>, request: &JsonRpcRe
         return JsonRpcResponse::failure(id, JsonRpcError::internal_error("compositor busy, try again"));
     };
 
-    let left = params.left.unwrap_or_else(|| state.workspace().active_column);
-    let new_offset = state.scroll_column(left, params.delta);
+    let col_idx = params.column.unwrap_or(state.workspace().active_column);
+    let new_offset = state.scroll_column(col_idx, params.delta);
     state.needs_redraw = true;
 
     let result = ScrollResult { new_offset };
@@ -252,6 +253,7 @@ fn handle_set_config(id: u64, state: &Rc<RefCell<TendrilState>>, request: &JsonR
         window_height: params.config.window_height,
         gaps: params.config.gaps,
         visible_windows: params.config.visible_windows,
+        column_count: params.config.column_count,
     };
     state.set_config(config);
 
@@ -269,8 +271,8 @@ fn handle_get_workspaces(id: u64, state: &Rc<RefCell<TendrilState>>) -> JsonRpcR
     let mut workspaces = Vec::new();
     for ws in state.workspaces.iter() {
         let mut windows = Vec::new();
-        for left in [true, false] {
-            let col = ws.column(left);
+        for col_idx in 0..ws.n_cols() {
+            let col = ws.column(col_idx);
             for (i, w) in col.windows.iter().enumerate() {
                 let y = w.y_position(i, &state.config, col.scroll_offset);
                 let title = w.toplevel
@@ -291,7 +293,7 @@ fn handle_get_workspaces(id: u64, state: &Rc<RefCell<TendrilState>>) -> JsonRpcR
                 windows.push(WindowInfo {
                     id: w.id,
                     workspace_id: ws.id,
-                    column: left,
+                    column: col_idx,
                     index: i,
                     y_position: y,
                     height: w.height,

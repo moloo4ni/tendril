@@ -74,10 +74,15 @@ impl XdgShellHandler for TendrilState {
         let smithay_window = SmithayWindow::new_wayland_window(surface);
         let window = Window::new(smithay_window, self.config.window_height);
 
-        // add to the column with fewer windows (prefer right on tie)
+        // add to the column with fewest windows (prefer higher index on tie)
         let ws = self.workspace_mut();
-        let left = ws.left_column.windows.len() < ws.right_column.windows.len();
-        ws.column_mut(left).windows.push(window);
+        let target = ws.columns
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, col)| col.windows.len())
+            .map(|(idx, _)| idx)
+            .unwrap_or(0);
+        ws.columns[target].windows.push(window);
         self.reconfigure_windows();
         self.needs_redraw = true;
         self.damage_full = true;

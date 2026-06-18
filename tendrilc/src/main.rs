@@ -23,9 +23,9 @@ enum Commands {
     Scroll {
         /// Delta in pixels (positive scrolls down, negative scrolls up)
         delta: f64,
-        /// Scroll left column (omit for active column)
+        /// Column index (omit for active column)
         #[arg(long)]
-        left: Option<bool>,
+        column: Option<usize>,
     },
     /// Focus a window by ID
     FocusWindow {
@@ -43,6 +43,9 @@ enum Commands {
         /// Number of visible windows per column
         #[arg(long, default_value_t = 2)]
         visible_windows: u32,
+        /// Number of columns
+        #[arg(long, default_value_t = 2)]
+        column_count: u32,
     },
     /// List all workspaces with their windows
     GetWorkspaces,
@@ -58,10 +61,10 @@ fn main() {
     let result = match cli.command {
         Commands::ListWindows => cmd_list_windows(),
         Commands::Config => cmd_config(),
-        Commands::Scroll { delta, left } => cmd_scroll(delta, left),
+        Commands::Scroll { delta, column } => cmd_scroll(delta, column),
         Commands::FocusWindow { id } => cmd_focus_window(id),
-        Commands::SetConfig { window_height, gaps, visible_windows } => {
-            cmd_set_config(window_height, gaps, visible_windows)
+        Commands::SetConfig { window_height, gaps, visible_windows, column_count } => {
+            cmd_set_config(window_height, gaps, visible_windows, column_count)
         }
         Commands::GetWorkspaces => cmd_get_workspaces(),
         Commands::SwitchWorkspace { id } => cmd_switch_workspace(id),
@@ -123,10 +126,9 @@ fn cmd_list_windows() -> Result<(), String> {
     println!("{:<8} {:<5} {:<7} {:<6} {:<10} Title", "ID", "WS", "Column", "Index", "Y");
     println!("{:-<8} {:-<5} {:-<7} {:-<6} {:-<10} {:-<20}", "", "", "", "", "", "");
     for w in &data.windows {
-        let col = if w.column { "left" } else { "right" };
         println!(
             "{:<8} {:<5} {:<7} {:<6} {:<10.1} {}",
-            w.id, w.workspace_id, col, w.index, w.y_position, w.title
+            w.id, w.workspace_id, w.column, w.index, w.y_position, w.title
         );
     }
     Ok(())
@@ -139,6 +141,7 @@ fn cmd_config() -> Result<(), String> {
     println!("window_height: {}", data.window_height);
     println!("gaps: {}", data.gaps);
     println!("visible_windows: {}", data.visible_windows);
+    println!("column_count: {}", data.column_count);
     Ok(())
 }
 
@@ -173,8 +176,8 @@ fn send_request_with_params(method: &str, params: &impl serde::Serialize) -> Res
     resp.result.ok_or_else(|| "no result in response".to_string())
 }
 
-fn cmd_scroll(delta: f64, left: Option<bool>) -> Result<(), String> {
-    let params = ScrollParams { delta, left };
+fn cmd_scroll(delta: f64, column: Option<usize>) -> Result<(), String> {
+    let params = ScrollParams { delta, column };
     let result = send_request_with_params(METHOD_SCROLL, &params)?;
     let data: ScrollResult =
         serde_json::from_value(result).map_err(|e| format!("parse result error: {e}"))?;
@@ -193,12 +196,13 @@ fn cmd_focus_window(id: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_set_config(window_height: u32, gaps: u32, visible_windows: u32) -> Result<(), String> {
+fn cmd_set_config(window_height: u32, gaps: u32, visible_windows: u32, column_count: u32) -> Result<(), String> {
     let params = SetConfigParams {
         config: ConfigData {
             window_height,
             gaps,
             visible_windows,
+            column_count,
         },
     };
     send_request_with_params(METHOD_SET_CONFIG, &params)?;
@@ -221,10 +225,9 @@ fn cmd_get_workspaces() -> Result<(), String> {
             continue;
         }
         for w in &ws.windows {
-            let col = if w.column { "left" } else { "right" };
             println!(
-                "  [{}] {} col={} y={:.1} h={} \"{}\"",
-                w.id, col, w.index, w.y_position, w.height, w.title
+                "  [{}] col={} idx={} y={:.1} h={} \"{}\"",
+                w.id, w.column, w.index, w.y_position, w.height, w.title
             );
         }
     }
