@@ -1,8 +1,11 @@
 mod input;
+mod ipc;
 mod render;
 mod shell;
 mod state;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -16,26 +19,29 @@ use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
-use state::TendrilState;
+use state::{Config, TendrilState};
 
 use crate::shell::AppClientState;
 
 struct AppState {
     display: Display<TendrilState>,
-    tendril: TendrilState,
+    tendril: Rc<RefCell<TendrilState>>,
 }
 
 impl AppState {
     fn idle(&mut self) {
-        let _ = self.display.dispatch_clients(&mut self.tendril);
+        let mut tendril = self.tendril.borrow_mut();
+        let _ = self.display.dispatch_clients(&mut *tendril);
         let _ = self.display.flush_clients();
-        self.tendril.idle();
+        tendril.idle();
     }
 }
 
 fn main() {
     env_logger::init();
     log::info!("starting tendril compositor (nested mode)");
+
+    let config = Config::load();
 
     let mut event_loop: calloop::EventLoop<AppState> =
         calloop::EventLoop::try_new().expect("failed to create event loop");
@@ -57,7 +63,7 @@ fn main() {
     let keyboard = seat.add_keyboard(Default::default(), 200, 200).ok();
     let pointer = Some(seat.add_pointer());
 
-    let tendril = TendrilState::new(
+    let tendril_inner = TendrilState::new(
         backend,
         compositor_state,
         xdg_shell_state,
@@ -71,12 +77,16 @@ fn main() {
         pointer,
     );
 
-    let mut app_state = AppState { display, tendril };
+    let tendril = Rc::new(RefCell::new(tendril_inner));
+    // Set config loaded from file
+    tendril.borrow_mut().config = config;
+
+    let mut app_state = AppState { display, tendril: tendril.clone() };
 
     event_loop
         .handle()
         .insert_source(source, |event, _, app_state: &mut AppState| {
-            app_state.tendril.handle_event(event);
+            app_state.tendril.borrow_mut().handle_event(event);
         })
         .expect("failed to register winit source");
 
@@ -98,6 +108,13 @@ fn main() {
             }
         })
         .expect("failed to register socket source");
+
+    let ipc_source = ipc::IpcSource::bind(app_state.tendril.clone())
+        .expect("failed to bind IPC socket");
+    event_loop
+        .handle()
+        .insert_source(ipc_source, |_, _, _| {})
+        .expect("failed to register IPC source");
 
     log::info!("tendril compositor started successfully");
 

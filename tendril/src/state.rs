@@ -31,7 +31,7 @@ use crate::input;
 
 static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     pub window_height: u32,
     pub gaps: u32,
@@ -44,6 +44,35 @@ impl Default for Config {
             window_height: 500,
             gaps: 1,
             visible_windows: 2,
+        }
+    }
+}
+
+impl Config {
+    pub fn load() -> Self {
+        let config_dir = std::env::var("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                let home = std::env::var("HOME").unwrap_or_default();
+                std::path::PathBuf::from(home).join(".config")
+            });
+        let path = config_dir.join("tendril").join("config.toml");
+
+        match std::fs::read_to_string(&path) {
+            Ok(content) => match toml::from_str(&content) {
+                Ok(config) => {
+                    log::info!("loaded config from {:?}", path);
+                    config
+                }
+                Err(e) => {
+                    log::warn!("failed to parse config at {:?}: {e}", path);
+                    Config::default()
+                }
+            },
+            Err(_) => {
+                log::info!("no config file at {:?}, using defaults", path);
+                Config::default()
+            }
         }
     }
 }
