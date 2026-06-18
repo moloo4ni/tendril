@@ -432,6 +432,53 @@ impl TendrilState {
         SERIAL_COUNTER.next_serial()
     }
 
+    pub fn focus_window(&mut self, id: usize) -> bool {
+        for (ws_idx, ws) in self.workspaces.iter_mut().enumerate() {
+            for left in [true, false] {
+                let col = ws.column_mut(left);
+                if let Some(idx) = col.windows.iter().position(|w| w.id == id) {
+                    col.focused_idx = Some(idx);
+                    self.active_workspace = ws_idx;
+                    ws.active_column = left;
+                    self.needs_redraw = true;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn switch_workspace(&mut self, id: usize) -> bool {
+        if id < self.workspaces.len() {
+            self.active_workspace = id;
+            self.needs_redraw = true;
+            self.damage_full = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn scroll_column(&mut self, left: bool, delta: f64) -> f64 {
+        let config = self.config.clone();
+        let vp_h = self.viewport_size.1 as i32;
+        let col = if left {
+            &mut self.workspace_mut().left_column
+        } else {
+            &mut self.workspace_mut().right_column
+        };
+        col.target_scroll_offset += delta;
+        col.clamp_scroll(&config, vp_h);
+        col.target_scroll_offset
+    }
+
+    pub fn set_config(&mut self, config: Config) {
+        self.config = config;
+        self.reconfigure_windows();
+        self.needs_redraw = true;
+        self.damage_full = true;
+    }
+
     pub fn idle(&mut self) {
         self.popup_manager.cleanup();
 
