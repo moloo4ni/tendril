@@ -1,24 +1,13 @@
-#![allow(dead_code)]
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
-use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::backend::renderer::utils::draw_render_elements;
-use smithay::backend::renderer::{Color32F, Frame, Renderer};
 use smithay::backend::winit::{self, WinitEvent};
 use smithay::desktop::Window as SmithayWindow;
 use smithay::input::keyboard::KeyboardHandle;
 use smithay::input::pointer::PointerHandle;
 use smithay::input::{Seat, SeatState};
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Rectangle, Serial, Transform};
-use smithay::wayland::compositor::{
-    with_surface_tree_downward, SurfaceAttributes, TraversalAction,
-};
+use smithay::utils::{Point, Rectangle, Serial, Size, SERIAL_COUNTER};
 use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::selection::data_device::DataDeviceState;
@@ -83,6 +72,7 @@ pub struct Window {
     pub toplevel: SmithayWindow,
     pub height: u32,
     pub z_index_offset: f32,
+    pub z_anim_delay: f64,
 }
 
 impl Window {
@@ -93,6 +83,7 @@ impl Window {
             toplevel,
             height,
             z_index_offset: 0.0,
+            z_anim_delay: 0.0,
         }
     }
 
@@ -100,6 +91,7 @@ impl Window {
         window_y_position(index, self.height, config.gaps, scroll_offset)
     }
 
+    #[allow(dead_code)]
     pub fn is_visible(
         &self,
         index: usize,
@@ -268,11 +260,14 @@ pub struct TendrilState {
     pub config: Config,
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    #[allow(dead_code)]
     pub decoration_state: XdgDecorationState,
     pub shm_state: ShmState,
     pub seat_state: SeatState<Self>,
+    #[allow(dead_code)]
     pub seat: Seat<Self>,
     pub data_device_state: DataDeviceState,
+    #[allow(dead_code)]
     pub display_handle: DisplayHandle,
     pub viewport_size: (u32, u32),
     pub cursor_pos: (f64, f64),
@@ -280,6 +275,8 @@ pub struct TendrilState {
     pub shift_pressed: bool,
     pub keyboard_handle: Option<KeyboardHandle<Self>>,
     pub pointer_handle: Option<PointerHandle<Self>>,
+    pub last_frame_time: Option<std::time::Instant>,
+    pub damage_full: bool,
 }
 
 impl TendrilState {
@@ -319,6 +316,8 @@ impl TendrilState {
             shift_pressed: false,
             keyboard_handle,
             pointer_handle,
+            last_frame_time: None,
+            damage_full: true,
         }
     }
 
@@ -339,6 +338,7 @@ impl TendrilState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn active_column(&self) -> &Column {
         let ws = self.workspace();
         if ws.active_column {
@@ -358,9 +358,11 @@ impl TendrilState {
                 self.viewport_size = (size.w as u32, size.h as u32);
                 self.reconfigure_windows();
                 self.needs_redraw = true;
+                self.damage_full = true;
             }
             WinitEvent::Redraw => {
                 self.needs_redraw = true;
+                self.damage_full = true;
             }
             WinitEvent::Focus(_) => {}
             WinitEvent::Input(event) => {
@@ -424,17 +426,80 @@ impl TendrilState {
     }
 
     pub fn serial(&self) -> Serial {
-        Serial::from(0)
+        SERIAL_COUNTER.next_serial()
     }
 
     pub fn idle(&mut self) {
+        let now = std::time::Instant::now();
+        let dt = self
+            .last_frame_time
+            .map(|t| (now - t).as_secs_f64())
+            .unwrap_or(0.016);
+        self.last_frame_time = Some(now);
+
+        // Advance all scroll animations
+        for ws in self.workspaces.iter_mut() {
+            for col in [&mut ws.left_column, &mut ws.right_column] {
+                let diff = (col.target_scroll_offset - col.scroll_offset).abs();
+                if diff > 0.5 {
+                    col.tick_scroll(10.0, dt);
+                } else {
+                    col.scroll_offset = col.target_scroll_offset;
+                }
+            }
+        }
+
+        // Tick z-effect animations
+        let mut z_animating = false;
+        for ws in self.workspaces.iter_mut() {
+            for col in [&mut ws.left_column, &mut ws.right_column] {
+                for w in col.windows.iter_mut() {
+                    if w.z_anim_delay > 0.0 {
+                        w.z_anim_delay -= dt;
+                        if w.z_anim_delay <= 0.0 {
+                            w.z_anim_delay = 0.0;
+                        }
+                    }
+                    if w.z_anim_delay <= 0.0 && w.z_index_offset > 0.0 {
+                        let target = 0.0;
+                        let diff = target - w.z_index_offset;
+                        if diff.abs() > 0.05 {
+                            w.z_index_offset += diff * 10.0 * dt as f32;
+                        } else {
+                            w.z_index_offset = 0.0;
+                        }
+                        z_animating = true;
+                    }
+                }
+            }
+        }
+
         if !self.needs_redraw {
-            return;
+            let animating = self.workspaces.iter().any(|ws| {
+                ws.left_column.scroll_offset != ws.left_column.target_scroll_offset
+                    || ws.right_column.scroll_offset != ws.right_column.target_scroll_offset
+            });
+            if !animating && !z_animating {
+                return;
+            }
         }
         self.needs_redraw = false;
 
         let size = self.backend.window_size();
-        let damage = Rectangle::from_size(size);
+        let damage = if self.damage_full {
+            self.damage_full = false;
+            vec![Rectangle::from_size(size)]
+        } else {
+            let col_width = (size.w as u32 - self.config.gaps) / 2;
+            let gaps = self.config.gaps as i32;
+            vec![
+                Rectangle::new(Point::new(0, 0), Size::new(col_width as i32 + gaps, size.h)),
+                Rectangle::new(
+                    Point::new(col_width as i32, 0),
+                    Size::new(col_width as i32 + gaps, size.h),
+                ),
+            ]
+        };
 
         let col_width = (size.w as u32 - self.config.gaps) / 2;
         let vp_height = size.h;
@@ -467,82 +532,8 @@ impl TendrilState {
 
         entries.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
 
-        let start = std::time::Instant::now();
-
-        let result = {
-            let (renderer, mut framebuffer) = match self.backend.bind() {
-                Ok(pair) => pair,
-                Err(e) => {
-                    log::error!("backend bind failed: {e:?}");
-                    return;
-                }
-            };
-
-            let mut elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = Vec::new();
-            for (x, y, scale, _, surface) in entries {
-                elements.extend(render_elements_from_surface_tree(
-                    renderer,
-                    &surface,
-                    (x, y),
-                    scale,
-                    1.0,
-                    Kind::Unspecified,
-                ));
-            }
-
-            let mut frame = match renderer.render(&mut framebuffer, size, Transform::Flipped180) {
-                Ok(f) => f,
-                Err(e) => {
-                    log::error!("renderer start failed: {e:?}");
-                    return;
-                }
-            };
-
-            if let Err(e) = frame.clear(Color32F::new(0.1, 0.1, 0.2, 1.0), &[damage]) {
-                log::error!("clear failed: {e:?}");
-            }
-
-            if let Err(e) = draw_render_elements(&mut frame, 1.0, &elements, &[damage]) {
-                log::error!("draw elements failed: {e:?}");
-            }
-
-            let time = start.elapsed().as_millis() as u32;
-
-            for surface in &all_windows {
-                send_frames_surface_tree(surface, time);
-            }
-
-            frame.finish()
-        };
-
-        if let Err(e) = result {
-            log::error!("frame finish failed: {e:?}");
-        }
-
-        if let Err(e) = self.backend.submit(Some(&[damage])) {
-            log::error!("backend submit failed: {e:?}");
-        }
+        crate::render::render_frame(&mut self.backend, size, &damage, &entries, &all_windows);
     }
-}
-
-pub fn send_frames_surface_tree(surface: &wl_surface::WlSurface, time: u32) {
-    with_surface_tree_downward(
-        surface,
-        (),
-        |_, _, &()| TraversalAction::DoChildren(()),
-        |_surf, states, &()| {
-            for callback in states
-                .cached_state
-                .get::<SurfaceAttributes>()
-                .current()
-                .frame_callbacks
-                .drain(..)
-            {
-                callback.done(time);
-            }
-        },
-        |_, _, &()| true,
-    );
 }
 
 #[cfg(test)]
