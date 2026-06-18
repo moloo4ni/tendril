@@ -150,7 +150,21 @@ fn handle_list_windows(id: u64, state: &Rc<RefCell<TendrilState>>) -> JsonRpcRes
             let col = ws.column(left);
             for (i, w) in col.windows.iter().enumerate() {
                 let y = w.y_position(i, &state.config, col.scroll_offset);
-                let title = String::new(); // TODO: read from XdgToplevelSurfaceRoleAttributes
+                let title = w.toplevel
+                    .toplevel()
+                    .and_then(|tl| {
+                        smithay::wayland::compositor::with_states(tl.wl_surface(), |states| {
+                            states
+                                .data_map
+                                .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+                                .expect("toplevel surface data")
+                                .lock()
+                                .unwrap()
+                                .title
+                                .clone()
+                        })
+                    })
+                    .unwrap_or_default();
                 windows.push(WindowInfo {
                     id: w.id,
                     workspace_id: ws.id,
