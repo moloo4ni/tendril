@@ -67,12 +67,6 @@ Smooth LERP scroll, damage tracking, persistent Z-effect.
 - **Mod+Scroll (mouse wheel) broken under Sway** — the host compositor captures
   the Mod key before Tendril sees it. Trackpad scroll under Mod may work with
   larger gestures. Workaround: configure Sway with a different `$mod`.
-- **Serial always 0** — `TendrilState::serial()` returns `Serial::from(0)`
-  unconditionally. Should use real serials from smithay.
-- **Popup surfaces not supported** — `XdgShellHandler::new_popup` logs a warning
-  and does nothing.
-- **Window title not exposed in IPC** — `list-windows` returns an empty string
-  for title; requires reading `XdgToplevelSurfaceRoleAttributes` via `with_states`.
 
 ## Future Ideas
 
@@ -80,6 +74,4 @@ Smooth LERP scroll, damage tracking, persistent Z-effect.
 - Multi-monitor support
 - Dynamic column count (three or more columns via config)
 - Config hot-reload over IPC
-- Window title in `list-windows` response
-- Popup surface support
 - Layer-shell protocol support (bars, overlays)

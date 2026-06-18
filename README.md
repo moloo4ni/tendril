@@ -23,7 +23,10 @@ A native KMS/DRM mode is planned.
 - Nested mode — runs inside your existing X11/Wayland session via winit
 - IPC & CLI — Unix socket JSON-RPC 2.0 protocol and `tendrilc` command-line client
 - TOML configuration — `~/.config/tendril/config.toml`
-- Z-effect — reordered windows get a subtle scale bump (`scale=1.05`)
+- Z-effect — reordered windows get a subtle scale bump (`scale=1.05`) that fades after 500ms
+- Smooth LERP scroll animation — per-column spring-like interpolation
+- Popup surface support — menus, dropdowns, tooltips work (GTK/Qt)
+- Damage-aware rendering — column-sized damage regions, full-viewport only on content changes
 - 5 workspaces — columns and focus are per-workspace
 
 ## Architecture
@@ -53,7 +56,7 @@ graph LR
 | `state.rs` | Core geometry, scroll math, rendering pipeline, `Config` |
 | `shell.rs` | Protocol handlers (xdg-shell, compositor, seat, shm, data-device) |
 | `input.rs` | Keyboard navigation, pointer events, scroll gating, reorder |
-| `render.rs` | Placeholder for Stage 6 animation & damage-tracking |
+| `render.rs` | Rendering pipeline (clear, draw, frame callbacks, damage regions) |
 | `ipc.rs` | Unix socket JSON-RPC server, calloop `EventSource` |
 | `tendril-ipc/` | Shared IPC types and JSON-RPC 2.0 envelope |
 | `tendrilc/` | CLI client with `clap` subcommands |
@@ -97,8 +100,8 @@ Or use `./run.sh` to start the compositor with six `kitty` terminals automatical
 
 ## Roadmap
 
-Stages 1–5 are complete. Stage 6 (smooth animations, damage tracking) is in
-progress. See [PLAN.md](PLAN.md) for the full roadmap and known issues.
+All 6 stages are complete. See [PLAN.md](PLAN.md) for the full roadmap and future
+ideas.
 
 ## License
 
